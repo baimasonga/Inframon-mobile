@@ -311,85 +311,135 @@ import 'dart:io';
               debugPrint('Profile fetch failed: $e');
             }
 
-            // 2. Clear local project cache
-            await db.delete('projects');
-            await db.delete('inspection_tasks');
-
-            // 3. Fetch Projects
+            // 2. Fetch everything FIRST (no local writes yet). If any of these
+            //    throw, the existing cache is preserved untouched so the
+            //    inspector can keep working offline.
             final profileRows = await db.query('user_profile', limit: 1);
             final List<String> districts = profileRows.isNotEmpty
                 ? List<String>.from(
                     jsonDecode(profileRows.first['assigned_districts'] as String? ?? '[]'))
                 : [];
 
-            final assignedProjResponse = await _supabase!
-                .from('project_assignments')
-                .select('project_id')
-                .eq('user_id', userId);
-            final List<String> assignedIds =
-                (assignedProjResponse as List<dynamic>)
-                    .map((p) => p['project_id'].toString())
-                    .toList();
+            List<dynamic> allProjects = [];
+            List<dynamic> tasks = [];
+            bool downloadOk = false;
+            try {
+              final assignedProjResponse = await _supabase!
+                  .from('project_assignments')
+                  .select('project_id')
+                  .eq('user_id', userId);
+              final List<String> assignedIds =
+                  (assignedProjResponse as List<dynamic>)
+                      .map((p) => p['project_id'].toString())
+                      .toList();
 
-            final Set<String> seenIds = {};
-            final List<dynamic> allProjects = [];
-
-            if (districts.isNotEmpty) {
-              final dp = await _supabase!
-                  .from('projects')
-                  .select()
-                  .inFilter('district', districts);
-              for (var p in dp as List<dynamic>) {
-                if (seenIds.add(p['id'].toString())) allProjects.add(p);
+              final Set<String> seenIds = {};
+              if (districts.isNotEmpty) {
+                final dp = await _supabase!
+                    .from('projects')
+                    .select()
+                    .inFilter('district', districts);
+                for (var p in dp as List<dynamic>) {
+                  if (seenIds.add(p['id'].toString())) allProjects.add(p);
+                }
               }
-            }
-            if (assignedIds.isNotEmpty) {
-              final dp = await _supabase!
-                  .from('projects')
-                  .select()
-                  .inFilter('id', assignedIds);
-              for (var p in dp as List<dynamic>) {
-                if (seenIds.add(p['id'].toString())) allProjects.add(p);
+              if (assignedIds.isNotEmpty) {
+                final dp = await _supabase!
+                    .from('projects')
+                    .select()
+                    .inFilter('id', assignedIds);
+                for (var p in dp as List<dynamic>) {
+                  if (seenIds.add(p['id'].toString())) allProjects.add(p);
+                }
               }
+
+              tasks = await _supabase!
+                  .from('inspection_tasks')
+                  .select()
+                  .eq('assignee_id', userId);
+              downloadOk = true;
+            } catch (e) {
+              debugPrint('Download phase failed, preserving local cache: $e');
             }
 
-            for (var p in allProjects) {
-              await db.insert(
-                'projects',
-                {
-                  'id':                    p['id'],
-                  'name':                  p['name'],
-                  'description':           p['description'],
-                  'status':                p['status'],
-                  'district':              p['district'],
-                  'completion_percentage': p['completion_percentage'] ?? 0,
-                  'created_at':            p['created_at'],
-                },
-                conflictAlgorithm: ConflictAlgorithm.replace,
-              );
-            }
+            // 3. Only swap the cache if EVERY fetch succeeded. Done in a
+            //    transaction so the inspector never sees a half-populated
+            //    project list. Locally-pending task edits (sync_status !=
+            //    'synced') are preserved — their server version will overwrite
+            //    once the queued update flushes.
+            if (downloadOk) {
+              final Set<String> fetchedProjectIds = {
+                for (final p in allProjects) p['id'].toString(),
+              };
+              final Set<String> fetchedTaskIds = {
+                for (final t in tasks) t['id'].toString(),
+              };
 
-            // 4. Fetch Tasks assigned to me
-            final tasks = await _supabase!
-                .from('inspection_tasks')
-                .select()
-                .eq('assignee_id', userId);
-            for (var t in tasks as List<dynamic>) {
-              await db.insert(
-                'inspection_tasks',
-                {
-                  'id':          t['id'],
-                  'project_id':  t['project_id'],
-                  'assignee_id': t['assignee_id'],
-                  'title':       t['title'],
-                  'description': t['description'],
-                  'deadline':    t['deadline'],
-                  'priority':    t['priority'],
-                  'status':      t['status'] ?? 'Pending',
-                  'sync_status': 'synced',
-                },
-                conflictAlgorithm: ConflictAlgorithm.replace,
-              );
+              await db.transaction((txn) async {
+                for (final p in allProjects) {
+                  await txn.insert(
+                    'projects',
+                    {
+                      'id':                    p['id'],
+                      'name':                  p['name'],
+                      'description':           p['description'],
+                      'status':                p['status'],
+                      'district':              p['district'],
+                      'completion_percentage': p['completion_percentage'] ?? 0,
+                      'created_at':            p['created_at'],
+                    },
+                    conflictAlgorithm: ConflictAlgorithm.replace,
+                  );
+                }
+                // Delete only projects that are no longer in the inspector's
+                // assignments. Projects are server-owned so a wholesale prune
+                // is safe (no local edits to lose).
+                if (fetchedProjectIds.isEmpty) {
+                  await txn.delete('projects');
+                } else {
+                  final placeholders =
+                      List.filled(fetchedProjectIds.length, '?').join(',');
+                  await txn.delete(
+                    'projects',
+                    where: 'id NOT IN ($placeholders)',
+                    whereArgs: fetchedProjectIds.toList(),
+                  );
+                }
+
+                for (final t in tasks) {
+                  await txn.insert(
+                    'inspection_tasks',
+                    {
+                      'id':          t['id'],
+                      'project_id':  t['project_id'],
+                      'assignee_id': t['assignee_id'],
+                      'title':       t['title'],
+                      'description': t['description'],
+                      'deadline':    t['deadline'],
+                      'priority':    t['priority'],
+                      'status':      t['status'] ?? 'Pending',
+                      'sync_status': 'synced',
+                    },
+                    conflictAlgorithm: ConflictAlgorithm.replace,
+                  );
+                }
+                // Prune unassigned tasks, but keep any local row with a
+                // pending edit queued in sync_queue.
+                if (fetchedTaskIds.isEmpty) {
+                  await txn.delete(
+                    'inspection_tasks',
+                    where: "sync_status = 'synced'",
+                  );
+                } else {
+                  final placeholders =
+                      List.filled(fetchedTaskIds.length, '?').join(',');
+                  await txn.delete(
+                    'inspection_tasks',
+                    where: "sync_status = 'synced' AND id NOT IN ($placeholders)",
+                    whereArgs: fetchedTaskIds.toList(),
+                  );
+                }
+              });
             }
           }
         }
