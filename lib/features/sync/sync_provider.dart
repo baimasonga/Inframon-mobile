@@ -12,6 +12,11 @@ import 'dart:io';
     // of the queue can drain. Bad rows surface in last_error for inspection.
     static const int _maxRetries = 5;
 
+    // Auto-sync may not fire more than once per this interval. Prevents a
+    // flaky cell tower from hammering Supabase as the radio bounces.
+    static const Duration _autoSyncMinInterval = Duration(seconds: 30);
+    DateTime? _lastAutoSyncAttempt;
+
     bool _isSyncing = false;
     bool get isSyncing => _isSyncing;
     DateTime? _lastSyncTime;
@@ -53,6 +58,16 @@ import 'dart:io';
         _isOnline = _hasNetwork(results);
         notifyListeners();
         if (!wasOnline && _isOnline && !_isSyncing && _pendingCount > 0) {
+          final now = DateTime.now();
+          final last = _lastAutoSyncAttempt;
+          if (last != null && now.difference(last) < _autoSyncMinInterval) {
+            debugPrint(
+              '[Sync] Connectivity restored but within backoff window '
+              '(${now.difference(last).inSeconds}s < ${_autoSyncMinInterval.inSeconds}s); skipping auto-sync',
+            );
+            return;
+          }
+          _lastAutoSyncAttempt = now;
           debugPrint('[Sync] Connectivity restored — auto-syncing $_pendingCount item(s)');
           // Fire-and-forget; syncNow guards against re-entry.
           unawaited(syncNow());
@@ -157,11 +172,53 @@ import 'dart:io';
       }
     }
 
+    int _stuckCount = 0;
+    int get stuckCount => _stuckCount;
+
     Future<void> updatePendingCount() async {
       final db = await DatabaseHelper.instance.database;
       final result = await db.rawQuery('SELECT COUNT(*) as count FROM sync_queue');
       _pendingCount = (result.first['count'] as int?) ?? 0;
+      final stuckResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM sync_queue WHERE retry_count >= ?',
+        [_maxRetries],
+      );
+      _stuckCount = (stuckResult.first['count'] as int?) ?? 0;
       notifyListeners();
+    }
+
+    /// Rows the queue has given up on (retry_count >= _maxRetries). Surface
+    /// these in a UI so the inspector or support can decide to retry or
+    /// discard. Not deleted automatically — silently dropping field data
+    /// would be worse than leaving a visible problem.
+    Future<List<Map<String, dynamic>>> stuckItems() async {
+      final db = await DatabaseHelper.instance.database;
+      return db.query(
+        'sync_queue',
+        where: 'retry_count >= ?',
+        whereArgs: [_maxRetries],
+        orderBy: 'id ASC',
+      );
+    }
+
+    /// Reset retry_count to 0 so the next syncNow() will try this row again.
+    Future<void> retryStuckItem(int id) async {
+      final db = await DatabaseHelper.instance.database;
+      await db.update(
+        'sync_queue',
+        {'retry_count': 0, 'last_error': null},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await updatePendingCount();
+    }
+
+    /// Permanently drop a queued row. Destructive — only call after the
+    /// inspector has acknowledged the loss.
+    Future<void> discardStuckItem(int id) async {
+      final db = await DatabaseHelper.instance.database;
+      await db.delete('sync_queue', where: 'id = ?', whereArgs: [id]);
+      await updatePendingCount();
     }
 
     Future<void> syncNow() async {
