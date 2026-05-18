@@ -1,12 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
   import 'package:flutter/foundation.dart';
+  import 'package:connectivity_plus/connectivity_plus.dart';
   import 'package:sqflite/sqflite.dart';
   import 'package:supabase_flutter/supabase_flutter.dart';
   import '../../core/database/db_helper.dart';
 
   class SyncProvider with ChangeNotifier {
+    // Per-item failures above this count are skipped (not deleted) so the rest
+    // of the queue can drain. Bad rows surface in last_error for inspection.
+    static const int _maxRetries = 5;
+
     bool _isSyncing = false;
     bool get isSyncing => _isSyncing;
     DateTime? _lastSyncTime;
@@ -15,10 +20,14 @@ import 'dart:typed_data';
     int _pendingCount = 0;
     int get pendingCount => _pendingCount;
 
+    bool _isOnline = true;
+    bool get isOnline => _isOnline;
+
     // ── Realtime notification state ───────────────────────────────────────────
     RealtimeChannel? _channel;
     Map<String, dynamic>? _latestNewTask;
     int _unreadTaskCount = 0;
+    StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
     Map<String, dynamic>? get latestNewTask => _latestNewTask;
     int get unreadTaskCount => _unreadTaskCount;
@@ -26,6 +35,34 @@ import 'dart:typed_data';
     SyncProvider() {
       updatePendingCount();
       _tryStartRealtime();
+      _startConnectivityWatch();
+    }
+
+    // ── Auto-sync when connectivity returns ───────────────────────────────────
+    Future<void> _startConnectivityWatch() async {
+      final connectivity = Connectivity();
+      // Seed current state so isOnline is correct on first read.
+      try {
+        final initial = await connectivity.checkConnectivity();
+        _isOnline = _hasNetwork(initial);
+      } catch (_) {
+        _isOnline = true; // fail open — let syncNow surface its own error
+      }
+      _connectivitySub = connectivity.onConnectivityChanged.listen((results) {
+        final wasOnline = _isOnline;
+        _isOnline = _hasNetwork(results);
+        notifyListeners();
+        if (!wasOnline && _isOnline && !_isSyncing && _pendingCount > 0) {
+          debugPrint('[Sync] Connectivity restored — auto-syncing $_pendingCount item(s)');
+          // Fire-and-forget; syncNow guards against re-entry.
+          unawaited(syncNow());
+        }
+      });
+    }
+
+    bool _hasNetwork(List<ConnectivityResult> results) {
+      return results.any((r) =>
+          r != ConnectivityResult.none && r != ConnectivityResult.bluetooth);
     }
 
     // ── Start Realtime subscription once auth is available ────────────────────
@@ -107,6 +144,8 @@ import 'dart:typed_data';
     @override
     void dispose() {
       stopRealtimeSubscription();
+      _connectivitySub?.cancel();
+      _connectivitySub = null;
       super.dispose();
     }
 
@@ -133,13 +172,22 @@ import 'dart:typed_data';
 
       try {
         final db = await DatabaseHelper.instance.database;
-        final queue = await db.query('sync_queue', orderBy: 'id ASC');
+        // Only attempt items still under the retry cap. Persistently-failing
+        // rows stay in the table (with last_error) so they can be inspected
+        // and re-queued manually instead of silently dropped.
+        final queue = await db.query(
+          'sync_queue',
+          where: 'retry_count < ?',
+          whereArgs: [_maxRetries],
+          orderBy: 'id ASC',
+        );
 
         for (final item in queue) {
           final id        = item['id'] as int;
           final type      = item['entity_type'] as String;
           final operation = item['operation'] as String;
           final payload   = jsonDecode(item['payload'] as String);
+          final retries   = (item['retry_count'] as int?) ?? 0;
 
           try {
             if (_supabase != null) {
@@ -215,8 +263,20 @@ import 'dart:typed_data';
               );
             }
           } catch (e) {
-            debugPrint('Sync failed for queue item $id: $e');
-            break;
+            // Don't halt the queue — record the failure on this row and move on.
+            // Network outages bump every remaining row's retry once; persistent
+            // schema/RLS errors will eventually exceed _maxRetries and be skipped.
+            debugPrint('Sync failed for queue item $id (retry ${retries + 1}/$_maxRetries): $e');
+            await db.update(
+              'sync_queue',
+              {
+                'retry_count': retries + 1,
+                'last_error': e.toString(),
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+            continue;
           }
         }
 
@@ -347,7 +407,8 @@ import 'dart:typed_data';
       const String bucket = 'inspection-photos';
       final List<Map<String, dynamic>> pending = await db.query(
         'inspection_photos',
-        where: "sync_status = 'pending'",
+        where: "sync_status = 'pending' AND retry_count < ?",
+        whereArgs: [_maxRetries],
       );
       for (final row in pending) {
         final int rowId      = row['id'] as int;
@@ -360,8 +421,20 @@ import 'dart:typed_data';
             continue;
           }
           final Uint8List bytes = await file.readAsBytes();
-          final String ext = path.split('.').last.toLowerCase();
-          final String storagePath = 'retry/$visitId/${rowId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final String rawExt = path.split('.').last.toLowerCase();
+          // Only allow known image extensions; default to jpg.
+          final String ext = (rawExt == 'png' || rawExt == 'jpg' || rawExt == 'jpeg')
+              ? rawExt
+              : 'jpg';
+          // Strip anything that isn't [A-Za-z0-9_-] to defeat path traversal.
+          final String safeVisitId =
+              visitId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+          if (safeVisitId.isEmpty) {
+            debugPrint('[PhotoSync] Skipping photo $rowId: empty visit id');
+            continue;
+          }
+          final String storagePath =
+              'retry/$safeVisitId/${rowId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
           await _supabase!.storage
               .from(bucket)
               .uploadBinary(
@@ -382,6 +455,10 @@ import 'dart:typed_data';
           debugPrint('[PhotoSync] Uploaded pending photo $rowId');
         } catch (e) {
           debugPrint('[PhotoSync] Failed to upload photo $rowId: $e');
+          await db.rawUpdate(
+            'UPDATE inspection_photos SET retry_count = retry_count + 1 WHERE id = ?',
+            [rowId],
+          );
         }
       }
     }

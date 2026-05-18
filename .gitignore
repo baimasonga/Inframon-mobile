@@ -43,3 +43,17 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Signing / secrets — never commit
+/android/key.properties
+*.jks
+*.keystore
+.env
+.env.*
+
+# Local analyzer / scratch dumps
+analyze_out*.txt
+analyze_output*.txt
+analysis_full*.txt
+analysis_output*.txt
+out.txt

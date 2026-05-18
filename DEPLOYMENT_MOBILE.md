@@ -2,15 +2,24 @@
 
 This guide outlines the steps to build and distribute the InfraMon Field Tool for production use.
 
-## 1. Production Validation
-Before building, ensure `lib/main.dart` contains your production Supabase credentials.
+## 1. Supabase Credentials (required for every build/run)
 
-```dart
-await Supabase.initialize(
-  url: 'https://your-project.supabase.co',
-  anonKey: 'your-production-anon-key',
-);
+Credentials are **not** stored in source. They must be passed at build/run time
+via `--dart-define`, matching the same Supabase project the web dashboard uses
+(`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+
+```bash
+flutter run \
+  --dart-define=SUPABASE_URL=https://your-project.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=your-anon-key
 ```
+
+For CI / release builds, prefer `--dart-define-from-file=env.json` and keep
+`env.json` out of git (already in `.gitignore` patterns).
+
+If either value is missing the app will fail fast on startup with a clear
+`StateError` — this is intentional, to prevent accidentally shipping a build
+pointed at the wrong project.
 
 ## 2. Android Deployment (Release)
 
@@ -27,10 +36,13 @@ keyAlias=upload
 storeFile=c:/Users/USER/upload-keystore.jks
 ```
 
+`key.properties` and `*.jks` are gitignored — never commit them.
+
 ### C. Build the App
-Run the following command in the root of the mobile app:
-- **For Play Store**: `flutter build appbundle`
-- **For Direct Install (APK)**: `flutter build apk --split-per-abi`
+Run the following command in the root of the mobile app, passing the same
+`--dart-define` flags shown in §1:
+- **For Play Store**: `flutter build appbundle --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
+- **For Direct Install (APK)**: `flutter build apk --split-per-abi --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
 
 The files will be located in `build/app/outputs/flutter-apk/`.
 
