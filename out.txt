@@ -1,0 +1,7 @@
+﻿Analyzing mobile_app...                                         
+
+   info - The imported package 'intl' isn't a dependency of the importing package - lib\features\attendance\attendance_screen.dart:4:8 - depend_on_referenced_packages
+   info - 'desiredAccuracy' is deprecated and shouldn't be used. use settings parameter with AndroidSettings, AppleSettings, WebSettings, or LocationSettings - lib\features\attendance\attendance_screen.dart:29:55 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\features\notifications\notifications_screen.dart:60:37 - unnecessary_underscores
+   info - The private field _reportedProgress could be 'final' - lib\features\verification\verification_screen.dart:22:10 - prefer_final_fields
+
