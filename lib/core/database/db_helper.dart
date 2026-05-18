@@ -19,7 +19,7 @@ import 'package:sqflite/sqflite.dart';
 
       return await openDatabase(
         path,
-        version: 5,
+        version: 6,
         onCreate: _createDB,
         onUpgrade: _onUpgrade,
       );
@@ -92,6 +92,18 @@ import 'package:sqflite/sqflite.dart';
           "ALTER TABLE inspection_photos ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
         );
       }
+      if (oldVersion < 6) {
+        // workforce_entry_screen writes project_id / record_date / sync_status /
+        // created_at, but the v1 schema only had visit_id-based columns. Without
+        // these adds, every workforce entry throws "no such column" and never
+        // reaches sync_queue → web dashboard shows nothing.
+        await db.execute('ALTER TABLE workforce_records ADD COLUMN project_id TEXT');
+        await db.execute('ALTER TABLE workforce_records ADD COLUMN record_date TEXT');
+        await db.execute(
+          "ALTER TABLE workforce_records ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+        );
+        await db.execute('ALTER TABLE workforce_records ADD COLUMN created_at TEXT');
+      }
     }
 
     Future _createDB(Database db, int version) async {
@@ -140,12 +152,16 @@ import 'package:sqflite/sqflite.dart';
 
       await db.execute("""
       CREATE TABLE workforce_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT PRIMARY KEY,
         visit_id TEXT,
+        project_id TEXT,
+        record_date TEXT,
         role_category TEXT,
         count INTEGER,
         gender TEXT,
-        is_youth INTEGER
+        is_youth INTEGER,
+        sync_status TEXT DEFAULT 'pending',
+        created_at TEXT
       )
       """);
 

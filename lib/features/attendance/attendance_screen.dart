@@ -151,6 +151,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       'created_at': now.toIso8601String(),
     });
 
+    // Queue the check-in as an UPSERT so the row appears on the web dashboard
+    // immediately, not only after the inspector remembers to check out. The
+    // matching check-out enqueues a second UPSERT for the same id; the sync
+    // layer uses upsert (not insert) for attendance so the second one updates
+    // the row instead of colliding on the primary key.
+    await db.insert('sync_queue', {
+      'entity_type': 'attendance_log',
+      'entity_id': id,
+      'operation': 'INSERT',
+      'payload': jsonEncode({
+        'id': id,
+        'project_id': _activeProjectId ?? '',
+        'inspector_id': inspectorId ?? '',
+        'check_in_time': now.toIso8601String(),
+        'check_out_time': null,
+        'gps_lat': lat,
+        'gps_lng': lng,
+        'verified_gps': lat != null,
+        'total_hours': null,
+        'created_at': now.toIso8601String(),
+      }),
+      'created_at': now.toIso8601String(),
+    });
+
     if (mounted) {
       setState(() {
         _checkedIn = true;
