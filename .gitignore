@@ -50,6 +50,7 @@ app.*.map.json
 *.keystore
 .env
 .env.*
+env.json
 
 # Local analyzer / scratch dumps
 analyze_out*.txt

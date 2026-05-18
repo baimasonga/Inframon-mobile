@@ -4,22 +4,35 @@ This guide outlines the steps to build and distribute the InfraMon Field Tool fo
 
 ## 1. Supabase Credentials (required for every build/run)
 
-Credentials are **not** stored in source. They must be passed at build/run time
-via `--dart-define`, matching the same Supabase project the web dashboard uses
-(`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+Credentials are **not** stored in source — they live in `env.json` at the repo
+root, which is gitignored. The Supabase project is the same one the web
+dashboard uses (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
 
-```bash
-flutter run \
-  --dart-define=SUPABASE_URL=https://your-project.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY=your-anon-key
+### One-time setup on a fresh clone
+
+Create `env.json` in the repo root (do NOT commit it):
+
+```json
+{
+  "SUPABASE_URL": "https://xmkbgqniylgrcudqmkca.supabase.co",
+  "SUPABASE_ANON_KEY": "<paste current anon key here>"
+}
 ```
 
-For CI / release builds, prefer `--dart-define-from-file=env.json` and keep
-`env.json` out of git (already in `.gitignore` patterns).
+### Daily run / build commands
 
-If either value is missing the app will fail fast on startup with a clear
-`StateError` — this is intentional, to prevent accidentally shipping a build
-pointed at the wrong project.
+```bash
+flutter run   --dart-define-from-file=env.json
+flutter build apk      --split-per-abi --dart-define-from-file=env.json
+flutter build appbundle               --dart-define-from-file=env.json
+```
+
+For CI builds the easiest path is to write `env.json` from a secret at the
+start of the job, then pass the same flag.
+
+If `env.json` is missing or either value is empty the app will fail fast on
+startup with a clear `StateError` — intentional, to prevent accidentally
+shipping a build pointed at the wrong project.
 
 ## 2. Android Deployment (Release)
 
@@ -39,10 +52,9 @@ storeFile=c:/Users/USER/upload-keystore.jks
 `key.properties` and `*.jks` are gitignored — never commit them.
 
 ### C. Build the App
-Run the following command in the root of the mobile app, passing the same
-`--dart-define` flags shown in §1:
-- **For Play Store**: `flutter build appbundle --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
-- **For Direct Install (APK)**: `flutter build apk --split-per-abi --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
+Run from the root of the mobile app (uses `env.json` from §1):
+- **For Play Store**: `flutter build appbundle --dart-define-from-file=env.json`
+- **For Direct Install (APK)**: `flutter build apk --split-per-abi --dart-define-from-file=env.json`
 
 The files will be located in `build/app/outputs/flutter-apk/`.
 
