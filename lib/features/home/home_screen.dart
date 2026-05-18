@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
   import '../../main.dart';
   import '../../core/database/db_helper.dart';
   import '../sync/sync_provider.dart';
+  import '../sync/sync_issues_screen.dart';
   import '../tasks/tasks_screen.dart';
 
   class HomeScreen extends StatefulWidget {
@@ -340,7 +341,33 @@ import 'package:flutter/material.dart';
                                 style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary),
                               ),
                             ),
-                            if (syncProvider.pendingCount > 0)
+                            if (syncProvider.stuckCount > 0)
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (_) => const SyncIssuesScreen(),
+                                  ));
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.danger.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.error_outline, size: 12, color: AppColors.danger),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${syncProvider.stuckCount} stuck',
+                                        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.danger),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else if (syncProvider.pendingCount > 0)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),

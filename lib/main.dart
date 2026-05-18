@@ -23,11 +23,15 @@ void main() async {
     ),
   );
 
-  await Supabase.initialize(
-    url: 'https://xmkbgqniylgrcudqmkca.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhta2JncW5peWxncmN1ZHFta2NhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU5MDIzMTcsImV4cCI6MjA5MTQ3ODMxN30.trAxiQ4n-zJrekxNSx6BmQcN9pY-NwFsmyUDyzorzbI',
-  );
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+    throw StateError(
+      'Missing Supabase credentials. Build with '
+      '--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...',
+    );
+  }
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
 
   await DatabaseHelper.instance.database;
   runApp(const InfraMonApp());

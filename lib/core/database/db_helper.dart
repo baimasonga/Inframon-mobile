@@ -19,7 +19,7 @@ import 'package:sqflite/sqflite.dart';
 
       return await openDatabase(
         path,
-        version: 4,
+        version: 5,
         onCreate: _createDB,
         onUpgrade: _onUpgrade,
       );
@@ -81,6 +81,16 @@ import 'package:sqflite/sqflite.dart';
           created_at TEXT
         )
         """);
+      }
+      if (oldVersion < 5) {
+        // Allow per-item retry tracking so one bad row doesn't halt the whole queue.
+        await db.execute(
+          "ALTER TABLE sync_queue ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+        );
+        await db.execute('ALTER TABLE sync_queue ADD COLUMN last_error TEXT');
+        await db.execute(
+          "ALTER TABLE inspection_photos ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+        );
       }
     }
 
@@ -237,6 +247,7 @@ import 'package:sqflite/sqflite.dart';
         local_path TEXT NOT NULL,
         remote_url TEXT,
         sync_status TEXT DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
         created_at TEXT
       )
       """);
@@ -248,6 +259,8 @@ import 'package:sqflite/sqflite.dart';
         entity_id TEXT NOT NULL,
         operation TEXT NOT NULL,
         payload TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
         created_at TEXT NOT NULL
       )
       """);
