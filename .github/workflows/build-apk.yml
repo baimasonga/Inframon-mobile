@@ -64,12 +64,17 @@ jobs:
             echo "::error::Missing repo secrets SUPABASE_URL and/or SUPABASE_ANON_KEY. Add them under Settings → Secrets and variables → Actions."
             exit 1
           fi
-          cat > env.json <<EOF
-          {
-            "SUPABASE_URL": "${SUPABASE_URL}",
-            "SUPABASE_ANON_KEY": "${SUPABASE_ANON_KEY}"
-          }
-          EOF
+          # Strip any whitespace / control chars that may have been pasted into
+          # the secret value (very easy to copy a stray \n from a doc). JWTs and
+          # Supabase URLs never contain whitespace, so this is safe.
+          clean_url=$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]')
+          clean_key=$(printf '%s' "$SUPABASE_ANON_KEY" | tr -d '[:space:]')
+          # Build the JSON with jq so escaping is correct and control chars in
+          # the values (if any survived) become \uXXXX rather than literal bytes.
+          jq -n \
+            --arg url "$clean_url" \
+            --arg key "$clean_key" \
+            '{SUPABASE_URL: $url, SUPABASE_ANON_KEY: $key}' > env.json
           # Sanity: confirm file is valid JSON without leaking values.
           python3 -c "import json; json.load(open('env.json'))"
           echo "env.json written ($(wc -c < env.json) bytes)"
