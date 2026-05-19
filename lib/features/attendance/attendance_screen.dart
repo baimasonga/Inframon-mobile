@@ -156,6 +156,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     // matching check-out enqueues a second UPSERT for the same id; the sync
     // layer uses upsert (not insert) for attendance so the second one updates
     // the row instead of colliding on the primary key.
+    // verified_gps is stored as INTEGER (0/1) on both sqflite and Supabase, so
+    // send the int directly — converting through a Dart bool would JSON-encode
+    // as "true"/"false" and Supabase would reject with 22P02.
     await db.insert('sync_queue', {
       'entity_type': 'attendance_log',
       'entity_id': id,
@@ -168,7 +171,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         'check_out_time': null,
         'gps_lat': lat,
         'gps_lng': lng,
-        'verified_gps': lat != null,
+        'verified_gps': lat != null ? 1 : 0,
         'total_hours': null,
         'created_at': now.toIso8601String(),
       }),
@@ -227,7 +230,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         'check_out_time': now.toIso8601String(),
         'gps_lat': record['gps_lat'],
         'gps_lng': record['gps_lng'],
-        'verified_gps': record['verified_gps'] == 1,
+        'verified_gps': record['verified_gps'] ?? 0,
         'total_hours': double.parse(totalHours.toStringAsFixed(1)),
         'created_at': record['created_at'],
       }),
