@@ -42,46 +42,81 @@ class _IssueReportScreenState extends State<IssueReportScreen> {
   }
 
   Future<void> _saveIssueLocally() async {
-    if (_titleController.text.isEmpty) {
+    if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter an issue title')),
       );
       return;
     }
+    // The Supabase FK on issues.project_id requires a real project row, and
+    // the issues_list_screen always passes a picked id, but defend against
+    // legacy callers that may still pass 'all' or empty.
+    final projectId = (widget.projectId.isEmpty || widget.projectId == 'all')
+        ? null
+        : widget.projectId;
+    if (projectId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a project from the issues list before reporting.'),
+        ),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
-    final db = await DatabaseHelper.instance.database;
-    final issueId = DateTime.now().millisecondsSinceEpoch.toString();
-    await db.insert('issues', {
-      'id': issueId,
-      'project_id': widget.projectId,
-      'title': _titleController.text,
-      'description': _descController.text,
-      'severity': _severity,
-      'status': 'open',
-      'location_lat': _currentPosition?.latitude,
-      'location_lng': _currentPosition?.longitude,
-      'sync_status': 'pending',
-    });
-    await db.insert('sync_queue', {
-      'entity_type': 'issue',
-      'entity_id': issueId,
-      'operation': 'INSERT',
-      'payload': jsonEncode({
+    try {
+      final db = await DatabaseHelper.instance.database;
+      final issueId = DateTime.now().millisecondsSinceEpoch.toString();
+      await db.insert('issues', {
         'id': issueId,
-        'project_id': widget.projectId,
-        'reported_by': Supabase.instance.client.auth.currentUser?.id,
-        'title': _titleController.text,
-        'description': _descController.text,
+        'project_id': projectId,
+        'title': _titleController.text.trim(),
+        'description': _descController.text.trim(),
         'severity': _severity,
-        'status': 'Open',
+        'status': 'open',
         'location_lat': _currentPosition?.latitude,
         'location_lng': _currentPosition?.longitude,
+        'sync_status': 'pending',
         'created_at': DateTime.now().toIso8601String(),
-      }),
-      'created_at': DateTime.now().toIso8601String(),
-    });
-    setState(() => _isSaving = false);
-    if (mounted) Navigator.pop(context);
+      });
+      await db.insert('sync_queue', {
+        'entity_type': 'issue',
+        'entity_id': issueId,
+        'operation': 'INSERT',
+        'payload': jsonEncode({
+          'id': issueId,
+          'project_id': projectId,
+          'reported_by': Supabase.instance.client.auth.currentUser?.id,
+          'title': _titleController.text.trim(),
+          'description': _descController.text.trim(),
+          'severity': _severity,
+          'status': 'Open',
+          'location_lat': _currentPosition?.latitude,
+          'location_lng': _currentPosition?.longitude,
+          'created_at': DateTime.now().toIso8601String(),
+        }),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Issue saved — will sync on next online tick.'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save issue: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
