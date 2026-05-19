@@ -139,7 +139,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
     await db.insert('attendance_records', {
       'id': id,
-      'project_id': _activeProjectId ?? '',
+      // Use null (not empty string) so the Supabase FK to projects resolves.
+      // Empty string isn't a valid project id and breaks the dashboard's
+      // PostgREST embed (PGRST200).
+      'project_id': _activeProjectId,
       'inspector_id': inspectorId ?? '',
       'check_in_time': now.toIso8601String(),
       'check_out_time': null,
@@ -165,7 +168,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       'operation': 'INSERT',
       'payload': jsonEncode({
         'id': id,
-        'project_id': _activeProjectId ?? '',
+        'project_id': _activeProjectId,
         'inspector_id': inspectorId ?? '',
         'check_in_time': now.toIso8601String(),
         'check_out_time': null,
