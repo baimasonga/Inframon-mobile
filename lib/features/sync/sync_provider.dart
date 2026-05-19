@@ -290,7 +290,15 @@ import 'dart:io';
                 } else {
                   tableName = type;
                 }
-                await _supabase!.from(tableName).insert(payload);
+                // Attendance is queued twice for the same id (once at check-in
+                // with a null check_out_time, once at check-out with the full
+                // record). Use upsert so the second one updates the first row
+                // instead of colliding on the primary key.
+                if (type == 'attendance_log') {
+                  await _supabase!.from(tableName).upsert(payload);
+                } else {
+                  await _supabase!.from(tableName).insert(payload);
+                }
               }
             }
 
