@@ -417,6 +417,17 @@ import 'dart:io';
                   if (seenIds.add(p['id'].toString())) allProjects.add(p);
                 }
               }
+              // Fallback: if the user has no district filter and no explicit
+              // project assignments, download every project they are allowed
+              // to see (RLS still gates this at the Supabase layer). Without
+              // this, an admin or unconfigured inspector ends up with zero
+              // projects locally and every form picker is empty.
+              if (districts.isEmpty && assignedIds.isEmpty) {
+                final dp = await _supabase!.from('projects').select();
+                for (var p in dp as List<dynamic>) {
+                  if (seenIds.add(p['id'].toString())) allProjects.add(p);
+                }
+              }
 
               tasks = await _supabase!
                   .from('inspection_tasks')
