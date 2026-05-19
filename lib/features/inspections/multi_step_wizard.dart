@@ -63,39 +63,24 @@ class _MultiStepInspectionWizardState extends State<MultiStepInspectionWizard> {
   }
 
   void _initializeChecklists() {
-    // Mocking template logic similar to web dashboard
+    // Standard inspection templates. Milestone IDs are NOT pre-populated —
+    // they'll be resolved against milestone_definitions on sync (by name +
+    // project) so the inspector's report ties back to real, server-defined
+    // milestones instead of hardcoded UUIDs that don't exist in Supabase.
     _milestones = [
-      {
-        'id': 'm0000000-0000-0000-0000-000000000001',
-        'name': 'Site Clearance',
-        'status': 'Completed',
-        'pct': 100,
-        'delay': 0,
-      },
-      {
-        'id': 'm0000000-0000-0000-0000-000000000002',
-        'name': 'Foundation Work',
-        'status': 'In Progress',
-        'pct': 45,
-        'delay': 2,
-      },
-      {
-        'id': 'm0000000-0000-0000-0000-000000000003',
-        'name': 'Structural Framing',
-        'status': 'Not Started',
-        'pct': 0,
-        'delay': 0,
-      },
+      {'id': null, 'name': 'Site Clearance',     'status': 'Not Started', 'pct': 0, 'delay': 0},
+      {'id': null, 'name': 'Foundation Work',    'status': 'Not Started', 'pct': 0, 'delay': 0},
+      {'id': null, 'name': 'Structural Framing', 'status': 'Not Started', 'pct': 0, 'delay': 0},
     ];
     _qualityChecks = [
-      {'item': 'Concrete Grade (C25/30)', 'pass': true},
-      {'item': 'Rebar Diameter Conformity', 'pass': true},
-      {'item': 'Safety Signage Visibility', 'pass': false},
+      {'item': 'Concrete Grade (C25/30)',    'pass': true},
+      {'item': 'Rebar Diameter Conformity',  'pass': true},
+      {'item': 'Safety Signage Visibility',  'pass': true},
     ];
     _materials = [
-      {'item': 'Cement (Grade 42.5)', 'pass': true},
-      {'item': 'Aggregate (Grain size)', 'pass': true},
-      {'item': 'Reinforcement Steel', 'pass': true},
+      {'item': 'Cement (Grade 42.5)',     'pass': true},
+      {'item': 'Aggregate (Grain size)',  'pass': true},
+      {'item': 'Reinforcement Steel',     'pass': true},
     ];
   }
 
@@ -166,6 +151,7 @@ class _MultiStepInspectionWizardState extends State<MultiStepInspectionWizard> {
     final db = await DatabaseHelper.instance.database;
     final visitId = DateTime.now().millisecondsSinceEpoch.toString();
 
+    try {
       // 1a. Upload photos to Supabase Storage (best-effort — offline safe)
       List<String> photoUrls = [];
       if (_photos.isNotEmpty) {
@@ -276,43 +262,57 @@ class _MultiStepInspectionWizardState extends State<MultiStepInspectionWizard> {
       'created_at': DateTime.now().toIso8601String(),
     });
 
-    setState(() => _isSaving = false);
-    if (mounted) {
-      // Mark linked task as Completed when inspection is submitted from a task
-      if (widget.taskId != null) {
-        try {
-          final now = DateTime.now().toIso8601String();
-          await db.update(
-            'inspection_tasks',
-            {
-              'status': 'Completed',
-              'updated_at': now,
-              'sync_status': 'pending',
-            },
-            where: 'id = ?',
-            whereArgs: [widget.taskId],
-          );
-          await db.insert('sync_queue', {
-            'entity_type': 'inspection_task_update',
-            'entity_id': widget.taskId!,
-            'operation': 'UPDATE',
-            'payload': '{"id":"' + widget.taskId! + '","status":"Completed","updated_at":"' + now + '"}',
-            'created_at': now,
-          });
-        } catch (e) {
-          debugPrint('Task auto-completion failed: ' + e.toString());
+      if (mounted) {
+        // Mark linked task as Completed when inspection is submitted from a task
+        if (widget.taskId != null) {
+          try {
+            final now = DateTime.now().toIso8601String();
+            await db.update(
+              'inspection_tasks',
+              {
+                'status': 'Completed',
+                'updated_at': now,
+                'sync_status': 'pending',
+              },
+              where: 'id = ?',
+              whereArgs: [widget.taskId],
+            );
+            await db.insert('sync_queue', {
+              'entity_type': 'inspection_task_update',
+              'entity_id': widget.taskId!,
+              'operation': 'UPDATE',
+              'payload': '{"id":"${widget.taskId!}","status":"Completed","updated_at":"$now"}',
+              'created_at': now,
+            });
+          } catch (e) {
+            debugPrint('Task auto-completion failed: $e');
+          }
         }
-      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(widget.taskId != null
-              ? 'Inspection saved — task marked as Completed!'
-              : 'Report saved and queued for synchronization!'),
-          backgroundColor: const Color(0xFF10B981),
-        ),
-      );
-      Navigator.pop(context, widget.taskId != null ? 'task_completed' : null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(widget.taskId != null
+                ? 'Inspection saved — task marked as Completed!'
+                : 'Report saved and queued for synchronization!'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+        Navigator.pop(context, widget.taskId != null ? 'task_completed' : null);
+      }
+    } catch (e) {
+      debugPrint('Inspection save failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save inspection: $e'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 

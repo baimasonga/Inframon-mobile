@@ -137,58 +137,61 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ? profileRows.first['id'] as String?
         : null;
 
-    await db.insert('attendance_records', {
-      'id': id,
-      // Use null (not empty string) so the Supabase FK to projects resolves.
-      // Empty string isn't a valid project id and breaks the dashboard's
-      // PostgREST embed (PGRST200).
-      'project_id': _activeProjectId,
-      'inspector_id': inspectorId ?? '',
-      'check_in_time': now.toIso8601String(),
-      'check_out_time': null,
-      'total_hours': null,
-      'gps_lat': lat,
-      'gps_lng': lng,
-      'verified_gps': lat != null ? 1 : 0,
-      'sync_status': 'pending',
-      'created_at': now.toIso8601String(),
-    });
-
-    // Queue the check-in as an UPSERT so the row appears on the web dashboard
-    // immediately, not only after the inspector remembers to check out. The
-    // matching check-out enqueues a second UPSERT for the same id; the sync
-    // layer uses upsert (not insert) for attendance so the second one updates
-    // the row instead of colliding on the primary key.
-    // verified_gps is stored as INTEGER (0/1) on both sqflite and Supabase, so
-    // send the int directly — converting through a Dart bool would JSON-encode
-    // as "true"/"false" and Supabase would reject with 22P02.
-    await db.insert('sync_queue', {
-      'entity_type': 'attendance_log',
-      'entity_id': id,
-      'operation': 'INSERT',
-      'payload': jsonEncode({
+    try {
+      await db.insert('attendance_records', {
         'id': id,
+        // Use null (not empty string) so the Supabase FK to projects resolves.
         'project_id': _activeProjectId,
         'inspector_id': inspectorId ?? '',
         'check_in_time': now.toIso8601String(),
         'check_out_time': null,
+        'total_hours': null,
         'gps_lat': lat,
         'gps_lng': lng,
         'verified_gps': lat != null ? 1 : 0,
-        'total_hours': null,
+        'sync_status': 'pending',
         'created_at': now.toIso8601String(),
-      }),
-      'created_at': now.toIso8601String(),
-    });
-
-    if (mounted) {
-      setState(() {
-        _checkedIn = true;
-        _checkInTime = DateFormat('HH:mm').format(now);
-        _loading = false;
       });
+
+      // verified_gps is stored as INTEGER (0/1) on both sqflite and Supabase.
+      await db.insert('sync_queue', {
+        'entity_type': 'attendance_log',
+        'entity_id': id,
+        'operation': 'INSERT',
+        'payload': jsonEncode({
+          'id': id,
+          'project_id': _activeProjectId,
+          'inspector_id': inspectorId ?? '',
+          'check_in_time': now.toIso8601String(),
+          'check_out_time': null,
+          'gps_lat': lat,
+          'gps_lng': lng,
+          'verified_gps': lat != null ? 1 : 0,
+          'total_hours': null,
+          'created_at': now.toIso8601String(),
+        }),
+        'created_at': now.toIso8601String(),
+      });
+
+      if (mounted) {
+        setState(() {
+          _checkedIn = true;
+          _checkInTime = DateFormat('HH:mm').format(now);
+          _loading = false;
+        });
+      }
+      await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Check-in failed: $e'),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-    await _loadData();
   }
 
   Future<void> _checkOut() async {
@@ -213,42 +216,53 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final totalHours =
         now.difference(checkInDt).inMinutes / 60.0;
 
-    await db.update(
-      'attendance_records',
-      {'check_out_time': now.toIso8601String(), 'total_hours': totalHours},
-      where: 'id = ?',
-      whereArgs: [record['id']],
-    );
+    try {
+      await db.update(
+        'attendance_records',
+        {'check_out_time': now.toIso8601String(), 'total_hours': totalHours},
+        where: 'id = ?',
+        whereArgs: [record['id']],
+      );
 
-    // Queue for sync
-    await db.insert('sync_queue', {
-      'entity_type': 'attendance_log',
-      'entity_id': record['id'],
-      'operation': 'INSERT',
-      'payload': jsonEncode({
-        'id': record['id'],
-        'project_id': record['project_id'],
-        'inspector_id': record['inspector_id'],
-        'check_in_time': record['check_in_time'],
-        'check_out_time': now.toIso8601String(),
-        'gps_lat': record['gps_lat'],
-        'gps_lng': record['gps_lng'],
-        'verified_gps': record['verified_gps'] ?? 0,
-        'total_hours': double.parse(totalHours.toStringAsFixed(1)),
-        'created_at': record['created_at'],
-      }),
-      'created_at': now.toIso8601String(),
-    });
-
-    if (mounted) {
-      setState(() {
-        _checkedIn = false;
-        _loading = false;
-        _activeProjectId = null;
-        _activeProjectName = null;
+      await db.insert('sync_queue', {
+        'entity_type': 'attendance_log',
+        'entity_id': record['id'],
+        'operation': 'INSERT',
+        'payload': jsonEncode({
+          'id': record['id'],
+          'project_id': record['project_id'],
+          'inspector_id': record['inspector_id'],
+          'check_in_time': record['check_in_time'],
+          'check_out_time': now.toIso8601String(),
+          'gps_lat': record['gps_lat'],
+          'gps_lng': record['gps_lng'],
+          'verified_gps': record['verified_gps'] ?? 0,
+          'total_hours': double.parse(totalHours.toStringAsFixed(1)),
+          'created_at': record['created_at'],
+        }),
+        'created_at': now.toIso8601String(),
       });
+
+      if (mounted) {
+        setState(() {
+          _checkedIn = false;
+          _loading = false;
+          _activeProjectId = null;
+          _activeProjectName = null;
+        });
+      }
+      await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Check-out failed: $e'),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-    await _loadData();
   }
 
   @override
