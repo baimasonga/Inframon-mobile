@@ -54,6 +54,22 @@ flutter run --dart-define-from-file=env.json
 The app intentionally fails at startup if either Supabase value is missing so a
 field build cannot accidentally point to the wrong backend.
 
+## Login troubleshooting after Supabase changes
+
+Supabase Auth users are project-specific. If the mobile app was rebuilt against
+a new Supabase project or a rotated key, an inspector who existed in the old
+project may receive `invalid_credentials` until their account is created or
+reset in the current shared Supabase project used by the web dashboard.
+
+When login fails after a backend change:
+
+1. Check the backend project reference shown at the bottom of the mobile login
+   screen.
+2. Confirm it matches the Supabase project configured for the web dashboard.
+3. In the web app/admin flow or Supabase Auth dashboard, create the inspector
+   user or send a password reset for that same email.
+4. Retry the mobile login with the new/reset password.
+
 ## Build commands
 
 ```bash

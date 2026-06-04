@@ -14,6 +14,17 @@ import 'features/notifications/notifications_screen.dart';
 import 'features/tasks/tasks_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class AppConfig {
+  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  static String get supabaseProjectRef {
+    final host = Uri.tryParse(supabaseUrl)?.host;
+    if (host == null || host.isEmpty) return 'not configured';
+    return host.split('.').first;
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
@@ -23,15 +34,16 @@ void main() async {
     ),
   );
 
-  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+  if (AppConfig.supabaseUrl.isEmpty || AppConfig.supabaseAnonKey.isEmpty) {
     throw StateError(
       'Missing Supabase credentials. Build with '
       '--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...',
     );
   }
-  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+  await Supabase.initialize(
+    url: AppConfig.supabaseUrl,
+    anonKey: AppConfig.supabaseAnonKey,
+  );
 
   await DatabaseHelper.instance.database;
   runApp(const InfraMonApp());
@@ -164,6 +176,25 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  String _loginErrorMessage(Object error) {
+    if (error is AuthApiException && error.code == 'invalid_credentials') {
+      return 'Invalid email or password for the current InfraMon backend '
+          '(${AppConfig.supabaseProjectRef}). If Supabase was recently changed, '
+          'ask an admin to create or reset this inspector account in the web app.';
+    }
+    if (error is AuthApiException) {
+      return 'Login failed: ${error.message}';
+    }
+    return 'Login failed. Check your connection and try again.';
+  }
+
   void _login() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -190,7 +221,10 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: ${e.toString()}')),
+          SnackBar(
+            content: Text(_loginErrorMessage(e)),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {
@@ -346,7 +380,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Field Inspector Access Only\nContact admin for account issues.',
+                    'Field Inspector Access Only\n'
+                    'Backend: ${AppConfig.supabaseProjectRef}\n'
+                    'Contact admin for account issues.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.inter(
                       fontSize: 12,

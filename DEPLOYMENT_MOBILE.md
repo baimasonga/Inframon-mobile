@@ -39,6 +39,14 @@ If `env.json` is missing or either value is empty the app will fail fast on
 startup with a clear `StateError` — intentional, to prevent accidentally
 shipping a build pointed at the wrong project.
 
+### Auth users after a Supabase project change
+
+Changing `SUPABASE_URL` points the app at a different Supabase Auth tenant.
+Existing inspector passwords do not automatically move between Supabase
+projects. After switching projects, create the inspector accounts in the current
+shared project or send password reset emails before distributing the new mobile
+build.
+
 ## 2. Android Deployment (Release)
 
 ### A. Create a Keystore
