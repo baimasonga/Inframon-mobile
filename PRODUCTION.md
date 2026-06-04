@@ -7,7 +7,7 @@ This guide covers how to build a release version of the InfraMon Mobile App and 
 Run this command in the `mobile_app` root directory:
 
 ```bash
-flutter build apk --release
+flutter build apk --release --dart-define-from-file=env.json
 ```
 
 The resulting file will be located at:
@@ -51,4 +51,4 @@ The app is pre-configured for Sierra Leone's mobile networks:
 
 ## 🏗 Maintenance Checklist
 - **App Versioning**: Every time you release an update, increment the version number in `pubspec.yaml` (e.g., `1.0.1+2`).
-- **Supabase Keys**: Ensure the `main.dart` Supabase URL matches your production project.
+- **Supabase Keys**: Ensure `env.json`/CI secrets use the same Supabase URL and anon key as the web dashboard before building.

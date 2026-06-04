@@ -14,10 +14,15 @@ Create `env.json` in the repo root (do NOT commit it):
 
 ```json
 {
-  "SUPABASE_URL": "https://xmkbgqniylgrcudqmkca.supabase.co",
-  "SUPABASE_ANON_KEY": "<paste current anon key here>"
+  "SUPABASE_URL": "https://<current-shared-project>.supabase.co",
+  "SUPABASE_ANON_KEY": "<paste current anon/public key here>"
 }
 ```
+
+Use the same Supabase project configured for the web dashboard at
+https://web-dashboard-inframon.vercel.app/. The web app normally reads the
+matching values from Vercel environment variables named
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
 ### Daily run / build commands
 
@@ -33,6 +38,14 @@ start of the job, then pass the same flag.
 If `env.json` is missing or either value is empty the app will fail fast on
 startup with a clear `StateError` — intentional, to prevent accidentally
 shipping a build pointed at the wrong project.
+
+### Auth users after a Supabase project change
+
+Changing `SUPABASE_URL` points the app at a different Supabase Auth tenant.
+Existing inspector passwords do not automatically move between Supabase
+projects. After switching projects, create the inspector accounts in the current
+shared project or send password reset emails before distributing the new mobile
+build.
 
 ## 2. Android Deployment (Release)
 
@@ -85,16 +98,16 @@ Since this is a government/enterprise tool, we recommend using **Firebase App Di
 ## 5. Rotating the Supabase Anon Key
 
 The mobile app and the web dashboard at https://web-dashboard-inframon.vercel.app/
-share one Supabase project (`xmkbgqniylgrcudqmkca`). Any prior anon key that was
-committed to source (now removed in commit `2ac1e7c`) remains recoverable from
-git history, so it MUST be rotated before the next field deployment.
+share one Supabase project. Any prior anon key that was committed to source
+(now removed in commit `2ac1e7c`) remains recoverable from git history, so it
+MUST be rotated before the next field deployment.
 
 Run the rotation as a single coordinated change — there is a short window where
 new key is live but old key is still accepted, which is what makes a safe
 rollover possible.
 
 1. **Generate a new anon key in Supabase**
-   - Go to https://supabase.com/dashboard/project/xmkbgqniylgrcudqmkca/settings/api-keys
+   - Go to the shared Supabase project's dashboard → Settings → API keys.
    - Under "Project API keys" → "anon / public", click "Roll" (or "Generate new key").
    - Supabase keeps the old key valid for ~24h on a free/pro plan; on enterprise it
      can be invalidated immediately. Confirm the grace period before proceeding.
@@ -109,7 +122,8 @@ rollover possible.
 
 3. **Update the mobile app build pipeline**
    - Update whatever holds the build-time `--dart-define=SUPABASE_ANON_KEY=...`
-     value (CI secret, local `env.json`, internal wiki). DO NOT commit the key.
+     value and matching `SUPABASE_URL` (CI secret, local `env.json`, internal
+     wiki). DO NOT commit the key.
    - Cut a new mobile build (`flutter build apk --split-per-abi ...`) and
      distribute via Firebase App Distribution (see §4).
    - Inspectors must install the new build before the grace window closes,
