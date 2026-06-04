@@ -1,17 +1,76 @@
-# mobile_app
+# InfraMon Mobile Field App
 
-A new Flutter project.
+InfraMon Mobile is the field data-capture app for the InfraMon web dashboard:
+https://web-dashboard-inframon.vercel.app/.
 
-## Getting Started
+Field inspectors use this app to capture project monitoring data on site. The
+app stores entries locally first so inspectors can keep working in poor network
+conditions, then syncs queued records to the shared Supabase backend used by the
+web dashboard.
 
-This project is a starting point for a Flutter application.
+## What the mobile app captures
 
-A few resources to get you started if this is your first Flutter project:
+The app is designed to collect the data that the web dashboard processes and
+presents, including:
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- project inspection reports and milestone updates;
+- assigned inspection task status updates;
+- issues observed in the field;
+- daily workforce records;
+- attendance/check-in data;
+- inspection photos and location metadata.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Backend relationship with the web dashboard
+
+The mobile app and web dashboard must point to the same Supabase project:
+
+- mobile uses `SUPABASE_URL` and `SUPABASE_ANON_KEY` at build/run time;
+- web uses the matching Vercel environment variables, typically
+  `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
+- the mobile app writes captured field data to Supabase tables/RPCs;
+- the web dashboard reads, processes, and displays that same Supabase data.
+
+Never commit Supabase keys to this repository. Keep local values in an
+untracked `env.json` file or in CI/deployment secrets.
+
+## Local setup
+
+Create `env.json` in the repository root:
+
+```json
+{
+  "SUPABASE_URL": "https://<current-shared-project>.supabase.co",
+  "SUPABASE_ANON_KEY": "<current anon/public key>"
+}
+```
+
+Then fetch dependencies and run the app:
+
+```bash
+flutter pub get
+flutter run --dart-define-from-file=env.json
+```
+
+The app intentionally fails at startup if either Supabase value is missing so a
+field build cannot accidentally point to the wrong backend.
+
+## Build commands
+
+```bash
+flutter build apk --split-per-abi --dart-define-from-file=env.json
+flutter build appbundle --dart-define-from-file=env.json
+```
+
+See [`DEPLOYMENT_MOBILE.md`](DEPLOYMENT_MOBILE.md) and
+[`PRODUCTION.md`](PRODUCTION.md) for release and distribution notes.
+
+## Verification checklist before field deployment
+
+1. Confirm the mobile `env.json` Supabase URL matches the web dashboard's Vercel
+   Supabase URL.
+2. Confirm the anon/public key has been rotated if an old key was exposed or
+   replaced.
+3. Build a fresh APK/app bundle with `--dart-define-from-file=env.json`.
+4. Log in as a field inspector, capture a small test record, sync it, and verify
+   that it appears in the web dashboard.
+5. Distribute the verified build to inspectors.
